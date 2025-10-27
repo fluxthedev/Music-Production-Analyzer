@@ -252,6 +252,9 @@ def analyze_audio_file(filepath, genre="general"):
     print("-" * 20)
 
     # --- 5. FREQUENCY ANALYSIS ---
+    print("-" * 20)
+
+    # --- 4. FREQUENCY ANALYSIS ---
     print("\n--- Frequency Analysis ---")
     mono_data = data.mean(axis=1) if is_stereo else data
     N = len(mono_data)
