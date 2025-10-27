@@ -1,5 +1,6 @@
 numpy
 scipy
 matplotlib
-soundfile 
+soundfile
 pyloudnorm
+librosa

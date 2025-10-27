@@ -5,6 +5,7 @@ from scipy.fft import fft, fftfreq
 import matplotlib.pyplot as plt
 import os
 import argparse
+import librosa
 
 # --- CONFIGURATION ---
 # This script now accepts a file path via the command line.
@@ -122,6 +123,83 @@ def detect_clipping(audio_data, threshold=0.999, consecutive_samples=3):
         print("  - Clipping: Excellent. No samples are near the maximum level. The signal is free of digital clipping.")
 
 
+def analyze_dynamics(audio_data, integrated_loudness, peak_db):
+    """
+    Analyzes and provides feedback on dynamic range metrics.
+    """
+    print("\n--- Dynamic Range Analysis ---")
+
+    # 1. Peak-to-Loudness Ratio (PLR)
+    plr = peak_db - integrated_loudness
+    print(f"  - Peak-to-Loudness Ratio (PLR): {plr:.2f} LU")
+    if plr > 14:
+        print("    - Feedback: Very dynamic. This track has a lot of punch and would be well-suited for genres like jazz or classical. It may sound quiet next to hyper-compressed tracks.")
+    elif 10 <= plr <= 14:
+        print("    - Feedback: Balanced dynamics. A good amount of punch and impact, suitable for a wide range of genres like pop, rock, and electronic music.")
+    elif plr < 10:
+        print("    - Feedback: Compressed. The track has a dense, loud sound, which is common in modern mastering. Be cautious of over-compression, which can make a track feel fatiguing.")
+
+    # 2. Crest Factor (calculated on mono signal for simplicity)
+    mono_data = audio_data.mean(axis=1) if audio_data.ndim > 1 else audio_data
+    peak_amplitude = np.max(np.abs(mono_data))
+    rms_amplitude = np.sqrt(np.mean(np.square(mono_data)))
+
+    if rms_amplitude > 0:
+        crest_factor = 20 * np.log10(peak_amplitude / rms_amplitude)
+        print(f"  - Crest Factor: {crest_factor:.2f} dB")
+        if crest_factor > 12:
+            print("    - Feedback: Highly transient. The peaks are significantly louder than the average level, indicating sharp, punchy sounds like drums are prominent.")
+        elif 8 <= crest_factor <= 12:
+            print("    - Feedback: Good punch. The track has a healthy balance between peaks and sustained sounds.")
+        else:
+            print("    - Feedback: Thick and sustained. The average level is close to the peak level, common in heavily limited or distorted tracks.")
+    else:
+        print("  - Crest Factor: Not available (silent audio).")
+
+
+def analyze_musical_context(filepath):
+    """
+    Analyzes the musical context (tempo and key) of the audio file.
+    """
+    print("\n--- Musical Context Analysis ---")
+    try:
+        # Load audio with librosa
+        y, sr = librosa.load(filepath, sr=None)
+
+        # 1. Tempo Detection
+        tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+        print(f"  - Estimated Tempo: {tempo:.2f} BPM")
+
+        # 2. Key Detection
+        chroma = librosa.feature.chroma_stft(y=y, sr=sr)
+        key_weights = np.sum(chroma, axis=1)
+
+        # Get the major and minor key probabilities
+        major_template = np.array([1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1])
+        minor_template = np.array([1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0])
+
+        major_correlations = [np.corrcoef(key_weights, np.roll(major_template, i))[0, 1] for i in range(12)]
+        minor_correlations = [np.corrcoef(key_weights, np.roll(minor_template, i))[0, 1] for i in range(12)]
+
+        # Find the best match
+        best_major_corr = np.max(major_correlations)
+        best_minor_corr = np.max(minor_correlations)
+
+        notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+
+        if best_major_corr > best_minor_corr:
+            key_index = np.argmax(major_correlations)
+            key = f"{notes[key_index]} Major"
+        else:
+            key_index = np.argmax(minor_correlations)
+            key = f"{notes[key_index]} Minor"
+
+        print(f"  - Estimated Key: {key}")
+
+    except Exception as e:
+        print(f"  - Error analyzing musical context: {e}")
+
+
 def analyze_audio_file(filepath, genre="general"):
     """
     Analyzes an audio file to extract loudness, peak, frequency, and stereo data.
@@ -169,6 +247,13 @@ def analyze_audio_file(filepath, genre="general"):
 
     print("-" * 20)
 
+    # --- 4. DYNAMIC RANGE ANALYSIS ---
+    analyze_dynamics(data, integrated_loudness, peak_level_db)
+    print("-" * 20)
+
+    # --- 5. FREQUENCY ANALYSIS ---
+    print("-" * 20)
+
     # --- 4. FREQUENCY ANALYSIS ---
     print("\n--- Frequency Analysis ---")
     mono_data = data.mean(axis=1) if is_stereo else data
@@ -201,7 +286,11 @@ def analyze_audio_file(filepath, genre="general"):
 
     print("-" * 20)
 
-    # --- 4. STEREO & MONO ANALYSIS ---
+    # --- 6. MUSICAL CONTEXT ANALYSIS ---
+    analyze_musical_context(filepath)
+    print("-" * 20)
+
+    # --- 7. STEREO & MONO ANALYSIS ---
     print("\n--- Stereo & Mono Analysis ---")
     if not is_stereo:
         print("Track is mono. Skipping stereo analysis.")
@@ -221,6 +310,17 @@ def analyze_audio_file(filepath, genre="general"):
 
         print(f"\n11. Low-End Stereo Check (below 150Hz):")
         print(f"    Side channel energy is ~{side_to_mid_ratio:.2f}% of the Mid channel energy.")
+
+        # Stereo Correlation Meter
+        correlation = np.corrcoef(left, right)[0, 1]
+        print(f"\n12. Stereo Correlation:")
+        print(f"    - Overall Correlation: {correlation:.2f}")
+        if correlation > 0.5:
+            print("    - Feedback: Good mono compatibility. The left and right channels are largely in phase.")
+        elif -0.5 <= correlation <= 0.5:
+            print("    - Feedback: Moderate stereo width. Some phase differences exist, which creates a sense of space, but listen in mono to ensure no key elements are lost.")
+        else:
+            print("    - Feedback: WARNING! Very wide or out-of-phase. Significant phase cancellation may occur in mono, potentially causing instruments to disappear or sound thin. Check for excessive stereo widening.")
     
     print("-" * 20)
     print("\nAnalysis complete.")
