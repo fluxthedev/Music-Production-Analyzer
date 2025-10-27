@@ -200,6 +200,48 @@ def analyze_musical_context(filepath):
         print(f"  - Error analyzing musical context: {e}")
 
 
+def analyze_stereo_width_bands(data, rate):
+    """
+    Analyzes the stereo width across different frequency bands.
+    """
+    print("\n--- Stereo Width Analysis (Frequency Bands) ---")
+    if data.ndim < 2 or data.shape[1] < 2:
+        return
+
+    left = data[:, 0]
+    right = data[:, 1]
+
+    bands = {'Lows': [0, 250], 'Mids': [250, 4000], 'Highs': [4000, 20000]}
+
+    for name, (fmin, fmax) in bands.items():
+        # This is a simplified approach. For a more accurate analysis,
+        # a proper filter bank (like Linkwitz-Riley) would be ideal.
+        # However, for a quick check, FFT filtering will suffice.
+
+        fft_left = fft(left)
+        fft_right = fft(right)
+        freqs = fftfreq(len(left), 1/rate)
+
+        # Create a mask for the frequency band
+        band_mask = (np.abs(freqs) >= fmin) & (np.abs(freqs) < fmax)
+
+        # Apply the mask and inverse FFT to get the filtered signal
+        left_band = np.real(np.fft.ifft(fft_left * band_mask))
+        right_band = np.real(np.fft.ifft(fft_right * band_mask))
+
+        if np.any(left_band) and np.any(right_band):
+            correlation = np.corrcoef(left_band, right_band)[0, 1]
+            print(f"  - {name} ({fmin}-{fmax} Hz) Correlation: {correlation:.2f}")
+            if correlation < 0:
+                print("    - WARNING: Potential out-of-phase content in this band.")
+            elif correlation < 0.5:
+                 print("    - WIDE: This band has a wide stereo image.")
+            else:
+                 print("    - CENTERED: This band is mostly centered or mono.")
+        else:
+            print(f"  - {name} ({fmin}-{fmax} Hz): Not enough signal to analyze.")
+
+
 def analyze_audio_file(filepath, genre="general"):
     """
     Analyzes an audio file to extract loudness, peak, frequency, and stereo data.
@@ -252,9 +294,6 @@ def analyze_audio_file(filepath, genre="general"):
     print("-" * 20)
 
     # --- 5. FREQUENCY ANALYSIS ---
-    print("-" * 20)
-
-    # --- 4. FREQUENCY ANALYSIS ---
     print("\n--- Frequency Analysis ---")
     mono_data = data.mean(axis=1) if is_stereo else data
     N = len(mono_data)
@@ -321,6 +360,8 @@ def analyze_audio_file(filepath, genre="general"):
             print("    - Feedback: Moderate stereo width. Some phase differences exist, which creates a sense of space, but listen in mono to ensure no key elements are lost.")
         else:
             print("    - Feedback: WARNING! Very wide or out-of-phase. Significant phase cancellation may occur in mono, potentially causing instruments to disappear or sound thin. Check for excessive stereo widening.")
+
+        analyze_stereo_width_bands(data, rate)
     
     print("-" * 20)
     print("\nAnalysis complete.")
